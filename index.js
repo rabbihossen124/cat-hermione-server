@@ -280,7 +280,30 @@ app.get("/api/events", async (req, res) => {
   }
 });
 
-// 2. Create Event Endpoint with strict future-date validation
+// 2. Get Recent Upcoming Events (Using .limit(6) operator of MongoDB - Assignment Requirement)
+app.get("/api/events/recent", async (req, res) => {
+  try {
+    const nowISO = new Date().toISOString();
+    // Filter for upcoming future events only
+    const query = { eventDate: { $gte: nowISO } };
+
+    // Explicitly using MongoDB .limit(6) operator, sorted chronologically
+    const recentEvents = await eventsCollection
+      .find(query)
+      .sort({ eventDate: 1 })
+      .limit(6)
+      .toArray();
+
+    return res.json(recentEvents);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to retrieve recent events: " + error.message,
+    });
+  }
+});
+
+// 3. Create Event Endpoint with strict future-date validation
 app.post("/api/events", async (req, res) => {
   try {
     const {
