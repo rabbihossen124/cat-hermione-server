@@ -13,6 +13,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Serverless MongoDB Connection Assurance Middleware
+app.use(async (req, res, next) => {
+  try {
+    if (!client.topology || !client.topology.isConnected()) {
+      await client.connect();
+    }
+  } catch (err) {
+    console.error("MongoDB reconnection error in serverless environment:", err);
+  }
+  next();
+});
+
 // MongoDB Client Initialization
 const uri = process.env.MONGO_URI;
 const client = new MongoClient(uri, {
@@ -28,51 +40,25 @@ export const db = client.db("unityaid");
 export const eventsCollection = db.collection("events");
 export const joinedEventsCollection = db.collection("joinedEvents");
 
-// Initial Grassroots Community Social Drives for Database Seeding
+// Initial Grassroots Community Social Drives for Database Seeding (2 Demo Events)
 const initialCommunityDrives = [
   {
-    title: "Winter Clothes & Warm Blanket Drive",
+    title: "Winter Clothes & Blanket Drive",
     description:
-      "Mobilizing local community members in Gulshan and Banani to distribute heavy fleece blankets, jackets, and thermal wear to vulnerable street dwellers and low-income families before severe winter cold waves.",
+      "Providing warm blankets and essential winter wear to vulnerable families before the seasonal cold peak. Volunteers help sort clothing packages and assist distribution.",
     eventType: "Donation",
     thumbnail:
       "https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=800&q=80",
-    location: "Gulshan 2 Circle, Dhaka",
+    location: "Gulshan, Dhaka",
     eventDate: "2026-11-15T10:00:00.000Z",
-    creatorName: "Tanzim Hasan",
-    creatorEmail: "tanzim.volunteer@unityaid.org",
+    creatorName: "Rahim Khan",
+    creatorEmail: "rahim.khan@unityaid.org",
     createdAt: new Date().toISOString(),
   },
   {
-    title: "Coastal Mangrove & Urban Tree Plantation",
+    title: "Children Education & Stationery Drive",
     description:
-      "Community forestry initiative planting 1,000 mangrove saplings and shade trees along embankment perimeters to combat coastal river erosion and enhance regional green cover.",
-    eventType: "Plantation",
-    thumbnail:
-      "https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80",
-    location: "Shyamnagar, Satkhira",
-    eventDate: "2026-11-20T08:30:00.000Z",
-    creatorName: "Rafiqul Islam",
-    creatorEmail: "rafiqul.trees@unityaid.org",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    title: "Clean City Campaign: Plastic Waste Cleanup",
-    description:
-      "Organizing citizen volunteers for intensive litter cleanup, plastic waste sorting, and roadside recycling education across major commuter avenues in Mirpur.",
-    eventType: "Cleanup",
-    thumbnail:
-      "https://images.unsplash.com/photo-1618477461853-cf6ed80faba5?auto=format&fit=crop&w=800&q=80",
-    location: "Mirpur 10 Circle, Dhaka",
-    eventDate: "2026-11-25T07:00:00.000Z",
-    creatorName: "Sumaiya Akter",
-    creatorEmail: "sumaiya.clean@unityaid.org",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    title: "Children Education & Literacy Stationery Drive",
-    description:
-      "Distributing textbooks, notebooks, geometry boxes, and creative art kits to support informal youth literacy centers and underprivileged primary students.",
+      "Distributing textbooks, notebooks, and creative art kits to support informal youth literacy and primary learning.",
     eventType: "Education",
     thumbnail:
       "https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&w=800&q=80",
@@ -80,32 +66,6 @@ const initialCommunityDrives = [
     eventDate: "2026-12-01T11:00:00.000Z",
     creatorName: "Nusrat Jahan",
     creatorEmail: "nusrat.edu@unityaid.org",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    title: "Free Rural Healthcare & Diabetes Screening",
-    description:
-      "Volunteer medical camp providing free physician consultations, blood glucose screening, blood pressure monitoring, and essential generic medicines for rural villagers.",
-    eventType: "Medical Aid",
-    thumbnail:
-      "https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&w=800&q=80",
-    location: "Pirganj, Rangpur",
-    eventDate: "2026-12-08T09:00:00.000Z",
-    creatorName: "Dr. Farhana Islam",
-    creatorEmail: "farhana.health@unityaid.org",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    title: "Emergency Food Relief & Grocery Ration Drive",
-    description:
-      "Packaging and delivering grocery food parcels (rice, lentils, cooking oil, potatoes, salt) to support low-income families and day-laborers facing seasonal price pressures.",
-    eventType: "Donation",
-    thumbnail:
-      "https://images.unsplash.com/photo-1593113646773-028c64a8f1b8?auto=format&fit=crop&w=800&q=80",
-    location: "Dhanmondi Lake Park, Dhaka",
-    eventDate: "2026-12-15T10:00:00.000Z",
-    creatorName: "Ahsan Habib",
-    creatorEmail: "ahsan.relief@unityaid.org",
     createdAt: new Date().toISOString(),
   },
 ];
@@ -620,7 +580,213 @@ app.delete("/api/joined-events/:id", async (req, res) => {
   }
 });
 
-// Server listener
-app.listen(PORT, () => {
-  console.log(`🚀 UnityAid Server is running on port ${PORT}`);
+// ==========================================
+// ORGANIZER MANAGE EVENTS APIs
+// ==========================================
+
+// 1. Get My Hosted Events (Private Organizer Route)
+app.get("/api/events/my-events", async (req, res) => {
+  try {
+    let email = req.query.email ? req.query.email.trim().toLowerCase() : "";
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded && decoded.email) {
+          email = decoded.email.toLowerCase();
+        }
+      } catch {
+        // Fallback to query email
+      }
+    }
+
+    if (!email) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Organizer authentication required to view hosted events.",
+      });
+    }
+
+    const myEvents = await eventsCollection
+      .find({ creatorEmail: email })
+      .sort({ eventDate: 1 })
+      .toArray();
+
+    return res.json(myEvents);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to retrieve organizer events: " + error.message,
+    });
+  }
 });
+
+// 2. Update Event Endpoint (With Future-Date Validation & Ownership Verification)
+app.put("/api/events/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, error: "Event ID is required for update." });
+    }
+
+    const { title, description, eventType, thumbnail, location, eventDate } = req.body;
+
+    // Strict Future-Date Validation if date is being updated
+    if (eventDate) {
+      const eventTime = new Date(eventDate).getTime();
+      const currentTime = Date.now();
+      if (isNaN(eventTime) || eventTime <= currentTime) {
+        return res.status(400).json({
+          success: false,
+          error: "Updated event date must be strictly in the future. Past dates are not allowed.",
+        });
+      }
+    }
+
+    let filter;
+    if (ObjectId.isValid(id)) {
+      filter = {
+        $or: [{ _id: new ObjectId(id) }, { _id: id }],
+      };
+    } else {
+      filter = { _id: id };
+    }
+
+    // Check if event exists
+    const existing = await eventsCollection.findOne(filter);
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: "Event not found with the provided ID.",
+      });
+    }
+
+    // Ownership Verification (if token provided)
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (
+          decoded &&
+          decoded.email &&
+          existing.creatorEmail &&
+          decoded.email.toLowerCase() !== existing.creatorEmail.toLowerCase()
+        ) {
+          return res.status(403).json({
+            success: false,
+            error: "Forbidden: You are only authorized to update events you have created.",
+          });
+        }
+      } catch {
+        // proceed if token decode fails or offline mode
+      }
+    }
+
+    // Build update payload
+    const updateFields = {};
+    if (title !== undefined) updateFields.title = title.trim();
+    if (description !== undefined) updateFields.description = description.trim();
+    if (eventType !== undefined) updateFields.eventType = eventType.trim();
+    if (thumbnail !== undefined) updateFields.thumbnail = thumbnail.trim();
+    if (location !== undefined) updateFields.location = location.trim();
+    if (eventDate !== undefined) updateFields.eventDate = new Date(eventDate).toISOString();
+    updateFields.updatedAt = new Date().toISOString();
+
+    const result = await eventsCollection.updateOne(filter, { $set: updateFields });
+
+    return res.json({
+      success: true,
+      message: "Community drive updated successfully!",
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to update event: " + error.message,
+    });
+  }
+});
+
+// 3. Delete Event Endpoint (With Ownership Verification & Cleanup)
+app.delete("/api/events/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, error: "Event ID is required for deletion." });
+    }
+
+    let filter;
+    if (ObjectId.isValid(id)) {
+      filter = {
+        $or: [{ _id: new ObjectId(id) }, { _id: id }],
+      };
+    } else {
+      filter = { _id: id };
+    }
+
+    // Check if event exists
+    const existing = await eventsCollection.findOne(filter);
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: "Event not found with the provided ID.",
+      });
+    }
+
+    // Ownership Verification (if token provided)
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (
+          decoded &&
+          decoded.email &&
+          existing.creatorEmail &&
+          decoded.email.toLowerCase() !== existing.creatorEmail.toLowerCase()
+        ) {
+          return res.status(403).json({
+            success: false,
+            error: "Forbidden: You are only authorized to delete events you have created.",
+          });
+        }
+      } catch {
+        // proceed
+      }
+    }
+
+    // Delete the event
+    const result = await eventsCollection.deleteOne(filter);
+
+    // Also clean up any volunteer registrations associated with this event
+    try {
+      await joinedEventsCollection.deleteMany({ eventId: String(id) });
+    } catch {
+      // ignore
+    }
+
+    return res.json({
+      success: true,
+      message: "Community drive and associated volunteer records deleted successfully.",
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to delete event: " + error.message,
+    });
+  }
+});
+
+// Local server listener (runs only when not in Vercel serverless environment)
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`🚀 UnityAid Server is running on port ${PORT}`);
+  });
+}
+
+// Export default app for Vercel serverless functions
+export default app;
