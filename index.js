@@ -28,6 +28,88 @@ export const db = client.db("unityaid");
 export const eventsCollection = db.collection("events");
 export const joinedEventsCollection = db.collection("joinedEvents");
 
+// Initial Grassroots Community Social Drives for Database Seeding
+const initialCommunityDrives = [
+  {
+    title: "Winter Clothes & Warm Blanket Drive",
+    description:
+      "Mobilizing local community members in Gulshan and Banani to distribute heavy fleece blankets, jackets, and thermal wear to vulnerable street dwellers and low-income families before severe winter cold waves.",
+    eventType: "Donation",
+    thumbnail:
+      "https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=800&q=80",
+    location: "Gulshan 2 Circle, Dhaka",
+    eventDate: "2026-11-15T10:00:00.000Z",
+    creatorName: "Tanzim Hasan",
+    creatorEmail: "tanzim.volunteer@unityaid.org",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    title: "Coastal Mangrove & Urban Tree Plantation",
+    description:
+      "Community forestry initiative planting 1,000 mangrove saplings and shade trees along embankment perimeters to combat coastal river erosion and enhance regional green cover.",
+    eventType: "Plantation",
+    thumbnail:
+      "https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80",
+    location: "Shyamnagar, Satkhira",
+    eventDate: "2026-11-20T08:30:00.000Z",
+    creatorName: "Rafiqul Islam",
+    creatorEmail: "rafiqul.trees@unityaid.org",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    title: "Clean City Campaign: Plastic Waste Cleanup",
+    description:
+      "Organizing citizen volunteers for intensive litter cleanup, plastic waste sorting, and roadside recycling education across major commuter avenues in Mirpur.",
+    eventType: "Cleanup",
+    thumbnail:
+      "https://images.unsplash.com/photo-1618477461853-cf6ed80faba5?auto=format&fit=crop&w=800&q=80",
+    location: "Mirpur 10 Circle, Dhaka",
+    eventDate: "2026-11-25T07:00:00.000Z",
+    creatorName: "Sumaiya Akter",
+    creatorEmail: "sumaiya.clean@unityaid.org",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    title: "Children Education & Literacy Stationery Drive",
+    description:
+      "Distributing textbooks, notebooks, geometry boxes, and creative art kits to support informal youth literacy centers and underprivileged primary students.",
+    eventType: "Education",
+    thumbnail:
+      "https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&w=800&q=80",
+    location: "New Market, Khulna",
+    eventDate: "2026-12-01T11:00:00.000Z",
+    creatorName: "Nusrat Jahan",
+    creatorEmail: "nusrat.edu@unityaid.org",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    title: "Free Rural Healthcare & Diabetes Screening",
+    description:
+      "Volunteer medical camp providing free physician consultations, blood glucose screening, blood pressure monitoring, and essential generic medicines for rural villagers.",
+    eventType: "Medical Aid",
+    thumbnail:
+      "https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&w=800&q=80",
+    location: "Pirganj, Rangpur",
+    eventDate: "2026-12-08T09:00:00.000Z",
+    creatorName: "Dr. Farhana Islam",
+    creatorEmail: "farhana.health@unityaid.org",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    title: "Emergency Food Relief & Grocery Ration Drive",
+    description:
+      "Packaging and delivering grocery food parcels (rice, lentils, cooking oil, potatoes, salt) to support low-income families and day-laborers facing seasonal price pressures.",
+    eventType: "Donation",
+    thumbnail:
+      "https://images.unsplash.com/photo-1593113646773-028c64a8f1b8?auto=format&fit=crop&w=800&q=80",
+    location: "Dhanmondi Lake Park, Dhaka",
+    eventDate: "2026-12-15T10:00:00.000Z",
+    creatorName: "Ahsan Habib",
+    creatorEmail: "ahsan.relief@unityaid.org",
+    createdAt: new Date().toISOString(),
+  },
+];
+
 // Connect to MongoDB Atlas
 export async function connectToMongoDB() {
   try {
@@ -35,6 +117,14 @@ export async function connectToMongoDB() {
     // Verify connection by pinging
     await client.db("admin").command({ ping: 1 });
     console.log("✓ Successfully connected to MongoDB Atlas (UnityAid Database)!");
+
+    // Auto-seed initial community drives if collection is empty
+    const count = await eventsCollection.countDocuments();
+    if (count === 0) {
+      await eventsCollection.insertMany(initialCommunityDrives);
+      console.log("✓ Seeded 6 verified community social drives into MongoDB Atlas!");
+    }
+
     return client;
   } catch (err) {
     console.error("MongoDB Atlas connection error:", err);
@@ -145,7 +235,52 @@ app.get("/api/auth/me", verifyJWT, (req, res) => {
 // EVENTS APIs
 // ==========================================
 
-// Create Event Endpoint with strict future-date validation
+// 1. Get All Upcoming Events (Public Directory with search, category filtering & sorting)
+app.get("/api/events", async (req, res) => {
+  try {
+    const { search, category, sort } = req.query;
+
+    const query = {};
+
+    // Strict Future-Date Constraint: Past events must not appear on Upcoming Events page
+    const nowISO = new Date().toISOString();
+    query.eventDate = { $gte: nowISO };
+
+    // Category Filter (Case-insensitive)
+    if (category && category !== "All") {
+      query.eventType = { $regex: new RegExp(`^${category.trim()}$`, "i") };
+    }
+
+    // Search Term (Matches title, location, or description)
+    if (search && search.trim()) {
+      const term = search.trim();
+      query.$or = [
+        { title: { $regex: term, $options: "i" } },
+        { location: { $regex: term, $options: "i" } },
+        { description: { $regex: term, $options: "i" } },
+      ];
+    }
+
+    // Sorting logic
+    let sortOptions = { eventDate: 1 }; // Default: earliest date first
+    if (sort === "date-desc") {
+      sortOptions = { eventDate: -1 };
+    } else if (sort === "title") {
+      sortOptions = { title: 1 };
+    }
+
+    const events = await eventsCollection.find(query).sort(sortOptions).toArray();
+
+    return res.json(events);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to retrieve events: " + error.message,
+    });
+  }
+});
+
+// 2. Create Event Endpoint with strict future-date validation
 app.post("/api/events", async (req, res) => {
   try {
     const {
@@ -159,7 +294,7 @@ app.post("/api/events", async (req, res) => {
       creatorEmail,
     } = req.body;
 
-    // 1. Mandatory Fields Validation
+    // Mandatory Fields Validation
     if (!title || !title.trim()) {
       return res.status(400).json({ success: false, error: "Event title is required." });
     }
@@ -201,7 +336,7 @@ app.post("/api/events", async (req, res) => {
       });
     }
 
-    // 2. Strict Future-Date Validation
+    // Strict Future-Date Validation
     const eventTime = new Date(eventDate).getTime();
     const currentTime = Date.now();
     if (isNaN(eventTime) || eventTime <= currentTime) {
@@ -211,7 +346,7 @@ app.post("/api/events", async (req, res) => {
       });
     }
 
-    // 3. Construct Document
+    // Construct Document
     const eventDoc = {
       title: title.trim(),
       description: description.trim(),
