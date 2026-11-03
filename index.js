@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import jwt from "jsonwebtoken";
-import { MongoClient, ServerApiVersion } from "mongodb";
+import { MongoClient, ServerApiVersion, ObjectId } from "mongodb";
 import "dotenv/config";
 
 const PORT = process.env.PORT || 5000;
@@ -394,6 +394,42 @@ app.post("/api/events", async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Failed to create event: " + error.message,
+    });
+  }
+});
+
+// 4. Get Single Event Details (Public Lookup)
+app.get("/api/events/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({ success: false, error: "Event ID is required" });
+    }
+
+    let query;
+    if (ObjectId.isValid(id)) {
+      query = {
+        $or: [{ _id: new ObjectId(id) }, { _id: id }],
+      };
+    } else {
+      query = { _id: id };
+    }
+
+    const event = await eventsCollection.findOne(query);
+
+    if (!event) {
+      return res.status(404).json({
+        success: false,
+        error: "Community drive not found with the provided ID",
+      });
+    }
+
+    return res.json(event);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to retrieve event details: " + error.message,
     });
   }
 });
