@@ -43,7 +43,7 @@ export async function connectToMongoDB() {
 
 connectToMongoDB();
 
-// JWT Verification Middleware (Assignment Challenge part)
+// JWT Verification Middleware (Assignment Challenge Requirement)
 export function verifyJWT(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
@@ -139,6 +139,105 @@ app.get("/api/auth/me", verifyJWT, (req, res) => {
     message: "Authenticated successfully with JWT token",
     user: req.user,
   });
+});
+
+// ==========================================
+// EVENTS APIs
+// ==========================================
+
+// Create Event Endpoint with strict future-date validation
+app.post("/api/events", async (req, res) => {
+  try {
+    const {
+      title,
+      description,
+      eventType,
+      thumbnail,
+      location,
+      eventDate,
+      creatorName,
+      creatorEmail,
+    } = req.body;
+
+    // 1. Mandatory Fields Validation
+    if (!title || !title.trim()) {
+      return res.status(400).json({ success: false, error: "Event title is required." });
+    }
+    if (!description || !description.trim()) {
+      return res.status(400).json({ success: false, error: "Event description is required." });
+    }
+    if (!location || !location.trim()) {
+      return res.status(400).json({ success: false, error: "Event location/assembly point is required." });
+    }
+    if (!thumbnail || !thumbnail.trim()) {
+      return res.status(400).json({ success: false, error: "Event thumbnail image URL is required." });
+    }
+    if (!eventDate) {
+      return res.status(400).json({ success: false, error: "Event date is required." });
+    }
+
+    // Determine creator email: from verified token or request body
+    let finalCreatorEmail = creatorEmail ? creatorEmail.trim().toLowerCase() : "";
+    let finalCreatorName = creatorName ? creatorName.trim() : "Community Organizer";
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded && decoded.email) {
+          finalCreatorEmail = decoded.email.toLowerCase();
+          if (decoded.name) finalCreatorName = decoded.name;
+        }
+      } catch {
+        // Fallback to body creatorEmail
+      }
+    }
+
+    if (!finalCreatorEmail) {
+      return res.status(400).json({
+        success: false,
+        error: "Creator email is required to associate and authenticate event ownership.",
+      });
+    }
+
+    // 2. Strict Future-Date Validation
+    const eventTime = new Date(eventDate).getTime();
+    const currentTime = Date.now();
+    if (isNaN(eventTime) || eventTime <= currentTime) {
+      return res.status(400).json({
+        success: false,
+        error: "Event date must be strictly in the future. Past dates are not allowed.",
+      });
+    }
+
+    // 3. Construct Document
+    const eventDoc = {
+      title: title.trim(),
+      description: description.trim(),
+      eventType: eventType ? eventType.trim() : "Donation",
+      thumbnail: thumbnail.trim(),
+      location: location.trim(),
+      eventDate: new Date(eventDate).toISOString(),
+      creatorName: finalCreatorName,
+      creatorEmail: finalCreatorEmail,
+      createdAt: new Date().toISOString(),
+    };
+
+    const result = await eventsCollection.insertOne(eventDoc);
+
+    return res.status(201).json({
+      success: true,
+      message: "Community drive created successfully!",
+      insertedId: result.insertedId,
+      event: { _id: result.insertedId, ...eventDoc },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to create event: " + error.message,
+    });
+  }
 });
 
 // Server listener
