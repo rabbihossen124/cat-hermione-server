@@ -434,6 +434,192 @@ app.get("/api/events/:id", async (req, res) => {
   }
 });
 
+// ==========================================
+// JOINED EVENTS APIs
+// ==========================================
+
+// 1. Join an Event Endpoint (With duplicate prevention)
+app.post("/api/joined-events", async (req, res) => {
+  try {
+    const {
+      eventId,
+      eventTitle,
+      eventDate,
+      location,
+      eventType,
+      thumbnail,
+      userEmail,
+      userName,
+    } = req.body;
+
+    if (!eventId) {
+      return res.status(400).json({ success: false, error: "Event ID is required to register." });
+    }
+
+    // Determine volunteer email: from verified token or request body
+    let finalUserEmail = userEmail ? userEmail.trim().toLowerCase() : "";
+    let finalUserName = userName ? userName.trim() : "Volunteer";
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded && decoded.email) {
+          finalUserEmail = decoded.email.toLowerCase();
+          if (decoded.name) finalUserName = decoded.name;
+        }
+      } catch {
+        // Fallback to body userEmail
+      }
+    }
+
+    if (!finalUserEmail) {
+      return res.status(401).json({
+        success: false,
+        error: "User authentication required. Please log in to join this community drive.",
+      });
+    }
+
+    // Duplicate Prevention Check: Cannot join the same event twice
+    const existing = await joinedEventsCollection.findOne({
+      eventId: String(eventId),
+      userEmail: finalUserEmail,
+    });
+
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        error: "You are already registered as an active volunteer for this event.",
+      });
+    }
+
+    const joinDoc = {
+      eventId: String(eventId),
+      eventTitle: (eventTitle || "Community Drive").trim(),
+      eventDate: eventDate || new Date().toISOString(),
+      location: (location || "Dhaka").trim(),
+      eventType: (eventType || "Community").trim(),
+      thumbnail: (thumbnail || "").trim(),
+      userEmail: finalUserEmail,
+      userName: finalUserName,
+      joinedAt: new Date().toISOString(),
+    };
+
+    const result = await joinedEventsCollection.insertOne(joinDoc);
+
+    return res.status(201).json({
+      success: true,
+      message: "Successfully registered as a volunteer!",
+      insertedId: result.insertedId,
+      record: { _id: result.insertedId, ...joinDoc },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to join event: " + error.message,
+    });
+  }
+});
+
+// 2. Get My Joined Events (Sorted by Event Date)
+app.get("/api/joined-events/my", async (req, res) => {
+  try {
+    let email = req.query.email ? req.query.email.trim().toLowerCase() : "";
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded && decoded.email) {
+          email = decoded.email.toLowerCase();
+        }
+      } catch {
+        // Fallback to query email
+      }
+    }
+
+    if (!email) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Log in or valid user email required to view joined events.",
+      });
+    }
+
+    // Find and sort chronologically by event date
+    const myJoined = await joinedEventsCollection
+      .find({ userEmail: email })
+      .sort({ eventDate: 1 })
+      .toArray();
+
+    return res.json(myJoined);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to retrieve joined events: " + error.message,
+    });
+  }
+});
+
+// 3. Cancel / Withdraw Volunteer Registration
+app.delete("/api/joined-events/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, error: "Registration ID is required." });
+    }
+
+    let userEmail = "";
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded && decoded.email) {
+          userEmail = decoded.email.toLowerCase();
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    let filter;
+    if (ObjectId.isValid(id)) {
+      filter = {
+        $or: [{ _id: new ObjectId(id) }, { _id: id }, { eventId: id }],
+      };
+    } else {
+      filter = {
+        $or: [{ _id: id }, { eventId: id }],
+      };
+    }
+
+    if (userEmail) {
+      filter.userEmail = userEmail;
+    }
+
+    const result = await joinedEventsCollection.deleteOne(filter);
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Joined event registration not found or already canceled.",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Volunteer registration withdrawn successfully.",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to cancel volunteer registration: " + error.message,
+    });
+  }
+});
+
 // Server listener
 app.listen(PORT, () => {
   console.log(`🚀 UnityAid Server is running on port ${PORT}`);
