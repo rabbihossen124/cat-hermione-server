@@ -1,9 +1,12 @@
 import express from "express";
 import cors from "cors";
+import jwt from "jsonwebtoken";
 import { MongoClient, ServerApiVersion } from "mongodb";
 import "dotenv/config";
 
 const PORT = process.env.PORT || 5000;
+const JWT_SECRET = process.env.JWT_SECRET || "unityaid_super_secret_jwt_key_2026_bangladesh";
+
 const app = express();
 
 // Middlewares
@@ -40,6 +43,37 @@ export async function connectToMongoDB() {
 
 connectToMongoDB();
 
+// JWT Verification Middleware (Assignment Challenge part)
+export function verifyJWT(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized access: Authorization header missing",
+    });
+  }
+
+  const parts = authHeader.split(" ");
+  if (parts.length !== 2 || parts[0] !== "Bearer") {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized access: Bearer token format required",
+    });
+  }
+
+  const token = parts[1];
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden access: Invalid or expired token",
+      });
+    }
+    req.user = decoded;
+    next();
+  });
+}
+
 // Root route
 app.get("/", (req, res) => {
   res.json({
@@ -66,6 +100,45 @@ app.get("/api/health", async (req, res) => {
       error: error.message,
     });
   }
+});
+
+// JWT Token Generation Endpoint
+app.post("/api/auth/jwt", (req, res) => {
+  try {
+    const user = req.body;
+    if (!user || !user.email) {
+      return res.status(400).json({
+        success: false,
+        error: "User email is required to issue a JWT token",
+      });
+    }
+
+    const payload = {
+      email: user.email,
+      name: user.name || "",
+    };
+
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+    res.json({
+      success: true,
+      token,
+      message: "JWT token issued successfully",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: "Failed to generate JWT token: " + error.message,
+    });
+  }
+});
+
+// Protected Profile / Token Verification Endpoint
+app.get("/api/auth/me", verifyJWT, (req, res) => {
+  res.json({
+    success: true,
+    message: "Authenticated successfully with JWT token",
+    user: req.user,
+  });
 });
 
 // Server listener
